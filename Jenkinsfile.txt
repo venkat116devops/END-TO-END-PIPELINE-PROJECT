@@ -1,0 +1,96 @@
+pipeline {
+    agent any
+     tools {
+        maven 'maven3'
+        jdk 'jdk17'
+    }
+    environment {
+                SCANNER_HOME = tool 'sonar-scanner'
+            }
+
+    stages {
+        stage('GitCheckout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/srinusrinuN/END-TO-END-PIPELINE.git'
+            }
+        }
+         stage('compile') {
+            steps {
+                sh "mvn compile"
+            }
+        }
+         stage('test') {
+            steps {
+                sh "mvn test"
+            }
+        }
+         stage('trivy fs Scanner') {
+            steps {
+                sh "trivy fs --format table -o fs.html ."
+            }
+        }
+         stage('sonarqube') {
+            steps {
+             withSonarQubeEnv('sonarqube-server') 
+              {
+            sh '$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=END-END -Dsonar.projectKey=END-END -Dsonar.java.binaries=target'
+          }
+            }
+        }
+         stage('package') {
+            steps {
+              sh 'mvn clean package'
+            }
+        }
+        stage('maven deploy') {
+            steps {
+            withMaven(globalMavenSettingsConfig: 'maven-settings', jdk: 'jdk17', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
+                    sh 'mvn deploy'
+                }
+            }
+        }
+         stage('DockerBuild') {
+            steps {
+                script{
+            withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                sh 'docker build -t venkat116/end-end-pipeline:latest .'
+                     }   
+                 }
+            }
+        }
+         stage('trivy-imageScan') {
+            steps {
+              sh 'trivy image --format table -o image.html venkat116/end-end-pipeline:latest '
+            }
+        }
+         stage('DockerPush') {
+            steps {
+                script{
+            withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                sh 'docker push  venkat116/end-end-pipeline:latest '
+                     }   
+                 }
+            }
+        }
+        stage('k8s-Deploy') {
+            steps {
+             withKubeConfig(caCertificate: '', clusterName: 'devopsshack-cluster', contextName: '', credentialsId: 'k8s', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://353E073CE5B7C7E0E06333A808FECC07.gr7.ap-south-1.eks.amazonaws.com') {
+                sh 'kubectl apply -f deployment-service.yml'  
+                sleep 20
+                 
+             }
+            }
+        }
+         stage('versification deploy') {
+            steps {
+             withKubeConfig(caCertificate: '', clusterName: 'devopsshack-cluster', contextName: '', credentialsId: 'k8s', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://353E073CE5B7C7E0E06333A808FECC07.gr7.ap-south-1.eks.amazonaws.com') {
+                sh 'kubectl get pods'
+                sh 'kubectl get svc '
+                sh 'kubectl get deploy'
+                 
+             }
+            }
+        }
+        
+    }
+}
